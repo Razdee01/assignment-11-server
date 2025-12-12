@@ -31,7 +31,7 @@ async function run() {
             participants: -1,
           })
           .limit(5)
-          .toArray(); 
+          .toArray();
 
         res.send(contests);
       } catch (error) {
@@ -39,18 +39,34 @@ async function run() {
         res.status(500).send({ message: "Failed to load popular contests" });
       }
     });
+    
     app.get("/all-contests", async (req, res) => {
-     
-        const contests = await contestsCollection.find().toArray(); 
-        res.send(contests);
-    });
-    app.get("/contests/:id", async (req, res) => {
-      const id = req.params.id;
-      const contest = await contestsCollection.findOne({ _id: new ObjectId(id) }); 
-      res.send(contest);
+      const { search } = req.query;
+      let filter = {};
+
+      if (search && search !== "All") {
+        // Case-insensitive regex match
+        filter.contentType = { $regex: `^${search}$`, $options: "i" };
+      }
+
+      try {
+        const contests = await contestsCollection.find(filter).toArray();
+        res.status(200).send(contests);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Error fetching contests" });
+      }
     });
     
-  
+
+    app.get("/contests/:id", async (req, res) => {
+      const id = req.params.id;
+      const contest = await contestsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.send(contest);
+    });
+
     await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"

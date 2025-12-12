@@ -5,7 +5,7 @@ const port = 3000;
 app.use(express.json());
 app.use(cors());
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const uri =
   "mongodb+srv://contestHub-db:QBYR33eiAyOcD3Sp@cluster0.xujbby0.mongodb.net/?appName=Cluster0";
 
@@ -27,7 +27,9 @@ async function run() {
       try {
         const contests = await contestsCollection
           .find()
-          .sort({ participantsCount: -1 }) 
+          .sort({
+            participants: -1,
+          })
           .limit(5)
           .toArray(); 
 
@@ -36,6 +38,16 @@ async function run() {
         console.error(error);
         res.status(500).send({ message: "Failed to load popular contests" });
       }
+    });
+    app.get("/all-contests", async (req, res) => {
+     
+        const contests = await contestsCollection.find().toArray(); 
+        res.send(contests);
+    });
+    app.get("/contests/:id", async (req, res) => {
+      const id = req.params.id;
+      const contest = await contestsCollection.findOne({ _id: new ObjectId(id) }); 
+      res.send(contest);
     });
     
   

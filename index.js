@@ -1,4 +1,8 @@
+require("dotenv").config();
+
 const express = require("express");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+
 const cors = require("cors");
 const app = express();
 const port = 3000;
@@ -58,6 +62,39 @@ async function run() {
       }
     });
     
+   app.post("/create-checkout-session", async (req, res) => {
+      const paymentData = req.body;
+      console.log(paymentData);
+    
+
+      const session = await stripe.checkout.sessions.create({
+        success_url: "https://example.com/success",
+        line_items: [
+          {
+            price_data: {
+              currency: "bdt",
+              product_data: {
+                name: paymentData.contestName,
+                description: paymentData.description,
+                images: [paymentData.bannerImage],
+              },
+              unit_amount: paymentData.amount * 100,
+            },
+            quantity: 1,
+          },
+        ],
+        customer_email: paymentData.userEmail,
+        mode: "payment",
+        metadata: {
+          contestId: paymentData.contestId,
+          userEmail: paymentData.userEmail,
+        },
+        success_url: "http://localhost:5173/payment-success",
+        cancel_url: `http://localhost:5173/contests/${paymentData.contestId}`,
+      });
+      res.send({ url: session.url });
+      
+    });
 
     app.get("/contests/:id", async (req, res) => {
       const id = req.params.id;

@@ -89,11 +89,16 @@ async function run() {
           contestId: paymentData.contestId,
           userEmail: paymentData.userEmail,
         },
-        success_url: "http://localhost:5173/payment-success",
+        success_url: "http://localhost:5173/payment-success?session_id={CHECKOUT_SESSION_ID}",
         cancel_url: `http://localhost:5173/contests/${paymentData.contestId}`,
       });
       res.send({ url: session.url });
       
+    });
+    app.post("/payment-success", async (req, res) => {
+      const { sessionid } = req.body;
+      const session = await stripe.checkout.sessions.retrieve(sessionid);
+      res.send(session);
     });
 
     app.get("/contests/:id", async (req, res) => {

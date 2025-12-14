@@ -39,7 +39,7 @@ async function run() {
 
         res.send(contests);
       } catch (error) {
-        console.error(error);
+      
         res.status(500).send({ message: "Failed to load popular contests" });
       }
     });
@@ -57,14 +57,14 @@ async function run() {
         const contests = await contestsCollection.find(filter).toArray();
         res.status(200).send(contests);
       } catch (err) {
-        console.error(err);
+        
         res.status(500).send({ message: "Error fetching contests" });
       }
     });
     
    app.post("/create-checkout-session", async (req, res) => {
       const paymentData = req.body;
-      console.log(paymentData);
+    
     
 
       const session = await stripe.checkout.sessions.create({
@@ -87,19 +87,63 @@ async function run() {
         mode: "payment",
         metadata: {
           contestId: paymentData.contestId,
+          contestName: paymentData.contestName,
+          bannerImage: paymentData.bannerImage, // ✅ ADD
+          description: paymentData.description, // ✅ ADD
+          userId: paymentData.userId,
+          userName: paymentData.userName,
           userEmail: paymentData.userEmail,
+          userPhoto: paymentData.userPhoto,
         },
-        success_url: "http://localhost:5173/payment-success?session_id={CHECKOUT_SESSION_ID}",
+
+        success_url:
+          "http://localhost:5173/payment-success?session_id={CHECKOUT_SESSION_ID}",
         cancel_url: `http://localhost:5173/contests/${paymentData.contestId}`,
       });
       res.send({ url: session.url });
       
     });
     app.post("/payment-success", async (req, res) => {
-      const { sessionid } = req.body;
-      const session = await stripe.checkout.sessions.retrieve(sessionid);
-      res.send(session);
+      try {
+        const { sessionId } = req.body;
+
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        console.log("SESSION PAYMENT STATUS:", session.payment_status);
+        console.log("SESSION METADATA:", session.metadata);
+
+        if (session.payment_status === "paid") {
+          const registrationInfo = {
+            contestId: session.metadata.contestId,
+            contestName: session.metadata.contestName,
+            bannerImage: session.metadata.bannerImage,
+            description: session.metadata.description,
+            amount: session.amount_total / 100,
+            userId: session.metadata.userId,
+            userName: session.metadata.userName,
+            userEmail: session.metadata.userEmail,
+            userPhoto: session.metadata.userPhoto,
+            transactionId: session.payment_intent,
+          };
+
+          console.log("====== REGISTRATION INFO ======");
+          console.log(registrationInfo);
+          console.log("===============================");
+
+          return res.send({
+            message: "Payment successful",
+            registrationInfo,
+          });
+        }
+
+        res.send({ message: "Payment not paid" });
+      } catch (error) {
+        console.error("PAYMENT SUCCESS ERROR:", error);
+        res.status(500).send({ error: error.message });
+      }
     });
+    
+    
 
     app.get("/contests/:id", async (req, res) => {
       const id = req.params.id;

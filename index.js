@@ -26,6 +26,7 @@ async function run() {
   try {
     const db = client.db("contestHub-db");
     const contestsCollection = db.collection("contests");
+    const registrationsCollection = db.collection("registrations");
 
     app.get("/popular-contests", async (req, res) => {
       try {
@@ -104,19 +105,24 @@ async function run() {
       
     });
     app.post("/payment-success", async (req, res) => {
-      try {
+     
         const { sessionId } = req.body;
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        console.log("SESSION PAYMENT STATUS:", session.payment_status);
-        console.log("SESSION METADATA:", session.metadata);
+      const contest= await contestsCollection.findOne({
+        _id:new ObjectId( session.metadata.contestId)
+      })
+      const registration= await registrationsCollection.findOne({
+        transactionId: session.payment_intent
+      })
 
-        if (session.payment_status === "paid") {
+        if (session.payment_status === "paid" && contest && !registration) {
           const registrationInfo = {
             contestId: session.metadata.contestId,
             contestName: session.metadata.contestName,
             bannerImage: session.metadata.bannerImage,
+            status:"pending",
             description: session.metadata.description,
             amount: session.amount_total / 100,
             userId: session.metadata.userId,
@@ -126,21 +132,30 @@ async function run() {
             transactionId: session.payment_intent,
           };
 
-          console.log("====== REGISTRATION INFO ======");
-          console.log(registrationInfo);
-          console.log("===============================");
-
-          return res.send({
-            message: "Payment successful",
-            registrationInfo,
-          });
+           const result=  await registrationsCollection.insertOne(registrationInfo);
+           await contestsCollection.updateOne(
+            { _id: new ObjectId(session.metadata.contestId) },
+            { $inc: { participants: 1 } }
+          );
+          return res.send({transactionId:session.payment_intent,registrationId:result.insertedId});
         }
 
-        res.send({ message: "Payment not paid" });
-      } catch (error) {
-        console.error("PAYMENT SUCCESS ERROR:", error);
-        res.status(500).send({ error: error.message });
-      }
+        res.send(res.send({transactionId:session.payment_intent,contestId:contest._id}));
+     
+    });
+    
+    app.get("/registrations/check", async (req, res) => {
+      const { contestId, email } = req.query;
+
+      const registration = await registrationsCollection.findOne({
+        userEmail: email,
+        $or: [
+          { contestId: contestId }, // old string data
+          { contestId: new ObjectId(contestId) }, // new ObjectId data
+        ],
+      });
+
+      res.send({ registered: !!registration });
     });
     
     

@@ -27,6 +27,8 @@ async function run() {
     const db = client.db("contestHub-db");
     const contestsCollection = db.collection("contests");
     const registrationsCollection = db.collection("registrations");
+    const submissionsCollection = db.collection("submissions");
+
 
     app.get("/popular-contests", async (req, res) => {
       try {
@@ -150,15 +152,73 @@ async function run() {
       const registration = await registrationsCollection.findOne({
         userEmail: email,
         $or: [
-          { contestId: contestId }, // old string data
-          { contestId: new ObjectId(contestId) }, // new ObjectId data
+          { contestId: contestId }, 
+          { contestId: new ObjectId(contestId) }, 
         ],
       });
 
       res.send({ registered: !!registration });
     });
-    
-    
+    app.post("/submit-task", async (req, res) => {
+      try {
+        const { contestId, taskLink, userEmail } = req.body;
+
+        if (!contestId || !taskLink || !userEmail) {
+          return res.status(400).send({ message: "Missing required fields" });
+        }
+
+        // 1️⃣ Check registration
+        const registration = await registrationsCollection.findOne({
+          userEmail,
+          $or: [{ contestId }, { contestId: new ObjectId(contestId) }],
+        });
+
+        if (!registration) {
+          return res.status(403).send({ message: "User not registered" });
+        }
+
+        // 2️⃣ Prevent duplicate submission
+        const existingSubmission = await submissionsCollection.findOne({
+          userEmail,
+          $or: [{ contestId }, { contestId: new ObjectId(contestId) }],
+        });
+
+        if (existingSubmission) {
+          return res.status(409).send({ message: "Already submitted" });
+        }
+
+        // 3️⃣ Save submission
+        const submission = {
+          contestId,
+          userEmail,
+          taskLink,
+          status: "submitted",
+          submittedAt: new Date(),
+        };
+
+        await submissionsCollection.insertOne(submission);
+
+        res.send({ message: "Submission successful" });
+      } catch (error) {
+        console.error("SUBMIT ERROR:", error);
+        res.status(500).send({ error: error.message });
+      }
+    });
+    app.get("/submissions/check", async (req, res) => {
+      const { contestId, email } = req.query;
+
+      const submission = await submissionsCollection.findOne({
+        userEmail: email,
+        $or: [{ contestId }, { contestId: new ObjectId(contestId) }],
+      });
+
+      res.send({ submitted: !!submission });
+    });
+    app.get("/registrations/:userEmail", async (req, res) => {
+      const userEmail = req.params.userEmail;
+      const registrations = await registrationsCollection.find({ userEmail }).toArray();
+      res.send(registrations);
+    });
 
     app.get("/contests/:id", async (req, res) => {
       const id = req.params.id;

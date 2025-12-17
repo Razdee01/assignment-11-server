@@ -13,7 +13,6 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const uri =
   "mongodb+srv://contestHub-db:QBYR33eiAyOcD3Sp@cluster0.xujbby0.mongodb.net/?appName=Cluster0";
 
-
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -63,43 +62,89 @@ async function run() {
     });
 
     app.post("/create-checkout-session", async (req, res) => {
-      const paymentData = req.body;
+      try {
+        const paymentData = req.body;
 
-      const session = await stripe.checkout.sessions.create({
-        success_url: "https://example.com/success",
-        line_items: [
-          {
-            price_data: {
-              currency: "bdt",
-              product_data: {
-                name: paymentData.contestName,
-                description: paymentData.description,
-                images: [paymentData.bannerImage],
+        // === NEW: Minimum amount check for BDT (Stripe requires ~50 US cents equivalent) ===
+        if (paymentData.amount < 100) {
+          return res.status(400).json({
+            message:
+              "Entry fee too low. Minimum ৳100 required for Stripe payment.",
+          });
+        }
+
+        // === Optional: Validate bannerImage (prevents crashes if invalid) ===
+        let images = [];
+        if (
+          typeof paymentData.bannerImage === "string" &&
+          paymentData.bannerImage.startsWith("https://")
+        ) {
+          images = [paymentData.bannerImage];
+        }
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          customer_email: paymentData.userEmail,
+          mode: "payment",
+          line_items: [
+            {
+              price_data: {
+                currency: "bdt",
+                product_data: {
+                  name: paymentData.contestName,
+                  description: paymentData.description,
+                  images: images, // safe — empty if invalid
+                },
+                unit_amount: Math.round(paymentData.amount * 100), // safe rounding
               },
-              unit_amount: paymentData.amount * 100,
+              quantity: 1,
             },
-            quantity: 1,
+          ],
+          metadata: {
+            contestId: paymentData.contestId,
+            contestName: paymentData.contestName,
+            bannerImage: paymentData.bannerImage || "",
+            description: paymentData.description,
+            userId: paymentData.userId,
+            userName: paymentData.userName,
+            userEmail: paymentData.userEmail,
+            userPhoto: paymentData.userPhoto || "",
+            creatorEmail: paymentData.userEmail, // temporary
           },
-        ],
-        customer_email: paymentData.userEmail,
-        mode: "payment",
-        metadata: {
-          contestId: paymentData.contestId,
-          contestName: paymentData.contestName,
-          bannerImage: paymentData.bannerImage, // ✅ ADD
-          description: paymentData.description, // ✅ ADD
-          userId: paymentData.userId,
-          userName: paymentData.userName,
-          userEmail: paymentData.userEmail,
-          userPhoto: paymentData.userPhoto,
-        },
+          success_url:
+            "http://localhost:5173/payment-success?session_id={CHECKOUT_SESSION_ID}",
+          cancel_url: `http://localhost:5173/contests/${paymentData.contestId}`,
+        });
 
-        success_url:
-          "http://localhost:5173/payment-success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url: `http://localhost:5173/contests/${paymentData.contestId}`,
-      });
-      res.send({ url: session.url });
+        res.send({ url: session.url });
+      } catch (error) {
+        console.error("Stripe Error:", error);
+        res.status(500).json({
+          message: "Failed to create checkout session",
+          error: error.message,
+        });
+      }
     });
+    // GET /winning-contests/:userEmail
+    // Returns contests where this user is the winner
+    app.get("/winning-contests/:userEmail", async (req, res) => {
+      try {
+        const userEmail = req.params.userEmail;
+
+        const winningContests = await contestsCollection
+          .find({ "winner.email": userEmail }) // matches winner.email
+          .sort({ deadline: -1 }) // newest first
+          .toArray();
+
+        console.log(`Found ${winningContests.length} wins for ${userEmail}`);
+
+        res.json(winningContests);
+      } catch (error) {
+        console.error("Error fetching winning contests:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
     app.post("/payment-success", async (req, res) => {
       const { sessionId } = req.body;
 
@@ -220,16 +265,38 @@ async function run() {
         .toArray();
       res.send(registrations);
     });
-    app.get("/participates/:userEmail", async (req, res) => {
-      const userEmail = req.params.userEmail;
-      const registrations = await registrationsCollection
-        .find({
-          contestId,
-        })
-        .toArray();
-      res.send(registrations);
+
+    app.get("/participates/:creatorEmail", async (req, res) => {
+      try {
+        const creatorEmail = req.params.creatorEmail;
+
+        const creatorContests = await contestsCollection
+          .find({ creatorEmail })
+          .toArray();
+
+        const contestIds = creatorContests.map((c) => c._id.toString());
+
+        const participants = await registrationsCollection
+          .find({ contestId: { $in: contestIds } })
+          .toArray();
+
+        // Enrich with contest name
+        const enriched = participants.map((p) => {
+          const contest = creatorContests.find(
+            (c) => c._id.toString() === p.contestId
+          );
+          return {
+            ...p,
+            contestName: contest ? contest.name : "Unknown Contest",
+          };
+        });
+
+        res.json(enriched);
+      } catch (error) {
+        console.error("Error fetching participants:", error);
+        res.status(500).json({ message: "Server error" });
+      }
     });
-    // Backend: Add this route to your server (e.g., index.js or routes/contest.js)
 
     app.post("/api/contests", async (req, res) => {
       try {
@@ -248,8 +315,6 @@ async function run() {
           creatorEmail,
         } = req.body;
 
-       // ← Change this to your email for easy testing
-
         const newContest = {
           name,
           bannerImage: image,
@@ -259,7 +324,7 @@ async function run() {
           taskDetails: taskInstruction,
           contentType: contestType,
           deadline: deadline, // already in ISO format
-          creatorEmail, // ← Hardcoded for now
+          creatorEmail,
           status: "pending",
           participants: 0,
         };
@@ -286,7 +351,90 @@ async function run() {
       }
     });
     // -----
+    // POST /api/contests/declare-winner
+    // Only the creator can call this (you can add auth later)
+    // POST /api/contests/declare-winner
+    app.post("/api/contests/declare-winner", async (req, res) => {
+      try {
+        const { contestId, winnerName, winnerEmail, winnerPhoto } = req.body;
 
+        if (!contestId || !winnerName || !winnerEmail) {
+          return res.status(400).json({ message: "Missing winner info" });
+        }
+
+        const result = await contestsCollection.updateOne(
+          { _id: new ObjectId(contestId) },
+          {
+            $set: {
+              winner: {
+                name: winnerName,
+                email: winnerEmail,
+                photo: winnerPhoto || "",
+              },
+              winnerDeclaredAt: new Date(),
+            },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: "Contest not found" });
+        }
+
+        res.json({ success: true, message: "Winner declared! 🏆" });
+      } catch (error) {
+        console.error("Error declaring winner:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+    // GET /my-contests/:creatorEmail
+    // GET /participated-contests/:userEmail
+    // Returns full contest details for contests the user has paid/registered for
+    app.get("/participated-contests/:userEmail", async (req, res) => {
+      try {
+        const userEmail = req.params.userEmail;
+
+        // Find all registrations for this user
+        const registrations = await registrationsCollection
+          .find({ userEmail })
+          .toArray();
+
+        if (registrations.length === 0) {
+          return res.json([]);
+        }
+
+        // Extract contest IDs (as strings)
+        const contestIds = registrations.map((reg) => reg.contestId.toString());
+
+        // Find full contest details
+        const contests = await contestsCollection
+          .find({ _id: { $in: contestIds.map((id) => new ObjectId(id)) } })
+          .toArray();
+
+        // Sort by deadline (earliest/upcoming first)
+        contests.sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+
+        res.json(contests);
+      } catch (error) {
+        console.error("Error fetching participated contests:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
+
+    app.get("/my-contests/:creatorEmail", async (req, res) => {
+      try {
+        const creatorEmail = req.params.creatorEmail;
+
+        const contests = await contestsCollection
+          .find({ creatorEmail })
+          .sort({ createdAt: -1 }) // newest first
+          .toArray();
+
+        res.json(contests);
+      } catch (error) {
+        console.error("Error fetching my contests:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     app.get("/contests/:id", async (req, res) => {
       const id = req.params.id;
       const contest = await contestsCollection.findOne({
@@ -301,11 +449,9 @@ async function run() {
     );
   } finally {
     // Ensures that the client will close when you finish/error
-   
   }
 }
 run().catch(console.dir);
-
 
 app.get("/", (req, res) => {
   res.send("Hello World!");
@@ -314,4 +460,3 @@ app.get("/", (req, res) => {
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
-

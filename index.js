@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
@@ -18,6 +19,21 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err)
+      return res.status(403).json({ message: "Invalid or expired token" });
+    req.user = decoded; // { email, role }
+    next();
+  });
+};
 
 async function run() {
   try {
@@ -27,6 +43,22 @@ async function run() {
     const submissionsCollection = db.collection("submissions");
     const usersCollection = db.collection("users");
 
+    app.post("/generate-token", async (req, res) => {
+      try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ message: "Email required" });
+
+        // Find user role
+        const userDoc = await usersCollection.findOne({ email });
+        const role = userDoc?.role || "User";
+
+        const token = jwt.sign({ email, role }, process.env.JWT_SECRET);
+
+        res.json({ token });
+      } catch (err) {
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     // ================= POPULAR CONTESTS =================
     app.get("/popular-contests", async (req, res) => {
       try {
@@ -276,7 +308,7 @@ async function run() {
     }
   });
     // Update contest by ID
-    app.patch("/api/contests/:id", async (req, res) => {
+    app.patch("/api/contests/:id", verifyToken, async (req, res) => {
       try {
         const contestId = req.params.id;
         const updateData = req.body;
@@ -305,7 +337,7 @@ async function run() {
       }
     });
 
-    app.delete("/creator/contests/:id", async (req, res) => {
+    app.delete("/creator/contests/:id", verifyToken, async (req, res) => {
       try {
         const contestId = req.params.id;
         const contest = await contestsCollection.findOne({
@@ -485,7 +517,7 @@ async function run() {
       }
     });
     /* ================= PARTICIPATED CONTESTS ================= */
-    app.get("/participated-contests/:userEmail", async (req, res) => {
+    app.get("/participated-contests/:userEmail", verifyToken, async (req, res) => {
       try {
         const userEmail = req.params.userEmail;
 
@@ -551,7 +583,7 @@ async function run() {
     });
 
     // ================= GET MY CONTESTS =================
-    app.get("/my-contests/:creatorEmail", async (req, res) => {
+    app.get("/my-contests/:creatorEmail", verifyToken, async (req, res) => {
       try {
         const creatorEmail = req.params.creatorEmail;
         const contests = await contestsCollection
@@ -605,7 +637,7 @@ async function run() {
     // });
 
     // GET all submissions for a specific contest
- app.get("/see-submissions/:contestId", async (req, res) => {
+ app.get("/see-submissions/:contestId",verifyToken, async (req, res) => {
    try {
      const contestId = req.params.contestId;
 
@@ -633,7 +665,7 @@ async function run() {
  });
     // ================= Admin =================
     // ================= GET ALL USERS =================
-    app.get("/admin/users", async (req, res) => {
+    app.get("/admin/users", verifyToken, async (req, res) => {
       try {
         const users = await usersCollection.find().toArray();
         res.json(users);
@@ -644,7 +676,7 @@ async function run() {
     });
 
     // ================= UPDATE USER ROLE =================
-    app.patch("/admin/users/:id/role", async (req, res) => {
+    app.patch("/admin/users/:id/role", verifyToken, async (req, res) => {
       try {
         const userId = req.params.id;
         const { role } = req.body;
@@ -665,7 +697,7 @@ async function run() {
     });
 
     // ================= GET ALL CONTESTS =================
-    app.get("/admin/contests", async (req, res) => {
+    app.get("/admin/contests", verifyToken, async (req, res) => {
       try {
         const contests = await contestsCollection.find().toArray();
         res.json(contests);
@@ -676,7 +708,7 @@ async function run() {
     });
 
     // ================= UPDATE CONTEST STATUS =================
-    app.patch("/admin/contests/:id/status", async (req, res) => {
+    app.patch("/admin/contests/:id/status", verifyToken, async (req, res) => {
       try {
         const contestId = req.params.id;
         const { status } = req.body; // "Confirmed" or "Rejected"
@@ -736,7 +768,7 @@ async function run() {
     });
 
     // ================= DELETE CONTEST =================
-    app.delete("/admin/contests/:id", async (req, res) => {
+    app.delete("/admin/contests/:id", verifyToken, async (req, res) => {
       try {
         const contestId = req.params.id;
         const result = await contestsCollection.deleteOne({

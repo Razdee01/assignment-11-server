@@ -785,6 +785,45 @@ async function run() {
         res.status(500).json({ message: "Failed to delete contest" });
       }
     });
+    app.get("/see-submissions/:contestId", verifyToken, async (req, res) => {
+      try {
+        const contestId = req.params.contestId;
+
+        // 1. Get everyone who PAID for this contest
+        const registrations = await registrationsCollection
+          .find({ contestId })
+          .toArray();
+
+        // 2. Get everyone who SUBMITTED a task for this contest
+        const submissions = await submissionsCollection
+          .find({ contestId })
+          .toArray();
+
+        // 3. Map registrations and attach the taskLink if it exists
+        const enriched = registrations.map((reg) => {
+          // Look for a matching submission in the submissions collection
+          const userSubmission = submissions.find(
+            (sub) => sub.userEmail === reg.userEmail
+          );
+
+          return {
+            _id: reg._id, // Use the registration ID for the React key
+            contestId,
+            userName: reg.userName || "Unknown",
+            userEmail: reg.userEmail,
+            userPhoto: reg.userPhoto || "",
+            // This is the important part:
+            taskLink: userSubmission ? userSubmission.taskLink : null,
+            submitted: !!userSubmission,
+          };
+        });
+
+        res.json(enriched);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Server error" });
+      }
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log("Connected to MongoDB!");

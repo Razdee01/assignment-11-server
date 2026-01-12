@@ -596,46 +596,7 @@ async function run() {
         res.status(500).json({ message: "Server error" });
       }
     });
-    // app.post("/contests", async (req, res) => {
-    //   try {
-    //     const {
-    //       name,
-    //       image,
-    //       description,
-    //       price,
-    //       prizeMoney,
-    //       taskInstruction,
-    //       contestType,
-    //       deadline,
-    //       creatorEmail,
-    //     } = req.body;
-
-    //     if (!creatorEmail) {
-    //       return res.status(400).json({ message: "Creator email required" });
-    //     }
-
-    //     const result = await contestsCollection.insertOne({
-    //       name,
-    //       bannerImage: image,
-    //       description,
-    //       entryFee: price,
-    //       prizeMoney,
-    //       taskInstruction,
-    //       contestType,
-    //       deadline,
-    //       creatorEmail,
-    //       status: "Pending",
-    //       participants: 0,
-    //       createdAt: new Date(),
-    //     });
-
-    //     res.json({ success: true, contestId: result.insertedId });
-    //   } catch (err) {
-    //     console.error(err);
-    //     res.status(500).json({ message: "Server error" });
-    //   }
-    // });
-
+    
     // GET all submissions for a specific contest
  app.get("/see-submissions/:contestId",verifyToken, async (req, res) => {
    try {
